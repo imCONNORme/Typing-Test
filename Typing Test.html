@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TypeFlow | Kinetic</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;500;800&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #0c0c0e;
+            --surface: #151518;
+            --text-main: #e0e0e0;
+            --text-muted: #4a4a50;
+            
+            /* Status Colors */
+            --c-correct: #10b981; /* Green */
+            --c-error: #ef4444;   /* Red */
+            --c-fixed: #fbbf24;   /* Yellow/Amber for corrected */
+            
+            --caret-color: #10b981;
+            
+            /* Dimensions */
+            --line-height: 4rem;
+            --font-size: 1.8rem;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+
+        /* --- UI Components --- */
+        #menu-layer {
+            position: absolute;
+            inset: 0;
+            background: var(--bg-color);
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.3s;
+        }
+        #menu-layer.hidden { opacity: 0; pointer-events: none; }
+
+        .title {
+            font-size: 3.5rem;
+            font-weight: 800;
+            letter-spacing: -2px;
+            margin-bottom: 2rem;
+            background: linear-gradient(to bottom right, #fff, #666);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .config-box {
+            display: grid;
+            gap: 1rem;
+            width: 100%;
+            max-width: 360px;
+        }
+
+        .row {
+            display: flex;
+            background: var(--surface);
+            border-radius: 10px;
+            padding: 4px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .btn {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 0.8rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+        .btn:hover { color: #fff; background: rgba(255,255,255,0.03); }
+        .btn.active { background: var(--text-main); color: var(--bg-color); }
+
+        .start-btn {
+            margin-top: 2rem;
+            padding: 1rem 3rem;
+            background: var(--c-correct);
+            color: #000;
+            border: none;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
+            transition: transform 0.1s;
+        }
+        .start-btn:hover { transform: scale(1.05); }
+
+        /* --- Game Area --- */
+        #game-ui {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            opacity: 0;
+            transition: opacity 0.4s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        #game-ui.visible { opacity: 1; }
+
+        .timer {
+            position: absolute;
+            top: 10%;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 3rem;
+            color: var(--text-muted);
+            font-weight: 700;
+        }
+        .timer.active { color: var(--c-correct); }
+
+        /* --- Stack --- */
+        .viewport {
+            position: relative;
+            width: 100%;
+            max-width: 1000px;
+            height: 350px;
+            overflow: hidden;
+            /* Gradient Mask */
+            mask-image: linear-gradient(to bottom, transparent, black 30%, black 70%, transparent);
+            -webkit-mask-image: linear-gradient(to bottom, transparent, black 30%, black 70%, transparent);
+            /* Add fade to right edge to indicate overflow */
+            mask-image: linear-gradient(to right, black 90%, transparent 100%), linear-gradient(to bottom, transparent, black 30%, black 70%, transparent);
+            -webkit-mask-composite: source-in;
+            mask-composite: intersect;
+        }
+
+        .stack {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            /* Smooth transitions for both X (pan) and Y (scroll) */
+            transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
+            will-change: transform;
+        }
+
+        .line {
+            height: var(--line-height);
+            display: flex;
+            align-items: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: var(--font-size);
+            color: var(--text-muted);
+            opacity: 0.2;
+            transition: 0.3s;
+            white-space: pre; /* Ensure line doesn't wrap */
+            padding-left: 4px;
+        }
+
+        .line.active { opacity: 1; color: var(--text-main); filter: blur(0); }
+        .line.active + .line { opacity: 0.5; filter: blur(0.5px); }
+        .line.active + .line + .line { opacity: 0.2; filter: blur(1px); }
+
+        .char { position: relative; transition: color 0.1s; }
+        .char.correct { color: var(--c-correct); }
+        .char.incorrect { color: var(--c-error); border-bottom: 2px solid var(--c-error); }
+        .char.corrected { color: var(--c-fixed); }
+
+        .enter-hint {
+            display: inline-block;
+            margin-left: 1rem;
+            font-size: 1rem;
+            color: var(--text-muted);
+            opacity: 0;
+            transform: translateX(-10px);
+            transition: all 0.3s;
+        }
+        .enter-hint.show { opacity: 1; transform: translateX(0); }
+
+        /* --- Cursor --- */
+        .caret {
+            position: absolute;
+            width: 3px;
+            height: 2.2rem;
+            background: var(--caret-color);
+            border-radius: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+            left: 0;
+            transition: left 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
+            box-shadow: 0 0 10px var(--caret-color);
+            z-index: 10;
+        }
+        .caret.blink { animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0; } }
+
+        /* --- FX --- */
+        .particle {
+            position: absolute;
+            width: 5px;
+            height: 5px;
+            background: var(--text-main);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 20;
+            animation: fly 0.5s forwards ease-out;
+        }
+        @keyframes fly {
+            to { transform: translate(var(--dx), var(--dy)) scale(0); opacity: 0; }
+        }
+
+        .shake { animation: shake 0.2s; }
+        @keyframes shake {
+            25% { transform: translateX(-2px); }
+            75% { transform: translateX(2px); }
+        }
+
+        /* --- Results --- */
+        #modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+        #modal.open { opacity: 1; pointer-events: all; }
+
+        .card {
+            background: var(--surface);
+            padding: 3rem;
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+            text-align: center;
+            min-width: 400px;
+            transform: translateY(20px);
+            transition: transform 0.3s;
+        }
+        #modal.open .card { transform: translateY(0); }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin: 2rem 0;
+        }
+
+        .stat-val { font-size: 4rem; font-weight: 700; color: var(--c-correct); line-height: 1; }
+        .stat-label { color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; }
+
+        #input-trap { position: absolute; opacity: 0; top: -1000px; }
+
+    </style>
+</head>
+<body>
+
+    <!-- MENU -->
+    <div id="menu-layer">
+        <div class="title">TYPEFLOW</div>
+        
+        <div class="config-box">
+            <div class="row" id="mode-select">
+                <button class="btn active" onclick="app.setMode('time')">Time</button>
+                <button class="btn" onclick="app.setMode('words')">Sentences</button>
+            </div>
+            <div class="row" id="target-select">
+                <!-- JS Filled -->
+            </div>
+        </div>
+
+        <button class="start-btn" onclick="app.startGame()">START TYPING</button>
+    </div>
+
+    <!-- GAME -->
+    <div id="game-ui">
+        <div class="timer" id="timer">30</div>
+        
+        <div class="viewport" id="viewport">
+            <div class="caret" id="caret"></div>
+            <div class="stack" id="stack"></div>
+        </div>
+    </div>
+
+    <!-- RESULTS -->
+    <div id="modal">
+        <div class="card">
+            <h2 style="color:white; margin-bottom: 2rem;">Result</h2>
+            <div class="stats-grid">
+                <div>
+                    <div class="stat-val" id="res-wpm">0</div>
+                    <div class="stat-label">WPM</div>
+                </div>
+                <div>
+                    <div class="stat-val" id="res-acc">0%</div>
+                    <div class="stat-label">Accuracy</div>
+                </div>
+            </div>
+            <div style="color: var(--text-muted); font-size: 0.9rem;">
+                Raw Speed: <span id="res-raw" style="color:white">0</span> &bull; 
+                Corrected: <span id="res-fixed" style="color:var(--c-fixed)">0</span>
+            </div>
+            <button class="start-btn" onclick="app.backToMenu()" style="margin-top: 2rem;">MENU</button>
+            <div style="margin-top: 1rem;">
+                <button class="btn" style="border:1px solid #333;" onclick="app.restart()">Quick Restart (Tab)</button>
+            </div>
+        </div>
+    </div>
+
+    <input type="text" id="input-trap" autocomplete="off">
+
+    <script>
+        const SENTENCES = [
+            "The quick brown fox jumps over the lazy dog.",
+            "Technology is best when it brings people together.",
+            "It does not matter how slowly you go as long as you do not stop.",
+            "Innovation distinguishes between a leader and a follower.",
+            "Design is not just what it looks like and feels like.",
+            "Simplicity is the ultimate sophistication.",
+            "Stay hungry, stay foolish.",
+            "Quality is more important than quantity.",
+            "The only way to do great work is to love what you do.",
+            "Code is like humor. When you have to explain it, it is bad.",
+            "Fix the cause, not the symptom.",
+            "Optimism is an occupational hazard of programming.",
+            "Simplicity is the soul of efficiency.",
+            "Make it work, make it right, make it fast.",
+            "Software is a great combination between artistry and engineering.",
+            "Programs must be written for people to read.",
+            "Truth can only be found in one place: the code.",
+            "Any fool can write code that a computer can understand.",
+            "Good programmers write code that humans can understand.",
+            "First, solve the problem. Then, write the code.",
+            "Experience is the name everyone gives to their mistakes.",
+            "Knowledge is power.",
+            "To err is human, to forgive divine.",
+            "A smooth sea never made a skilled sailor.",
+            "Do what you can, with what you have, where you are.",
+            "Everything you can imagine is real.",
+            "Whatever you do, do it well.",
+            "What we think, we become.",
+            "All our dreams can come true if we have the courage.",
+            "Believe you can and you are halfway there.",
+            "Action is the foundational key to all success.",
+            "It is never too late to be what you might have been.",
+            "Life is what happens when you are busy making other plans.",
+            "The future belongs to those who believe in the beauty of their dreams.",
+            "The best way to predict the future is to invent it.",
+            "A journey of a thousand miles begins with a single step.",
+            "Do not watch the clock; do what it does. Keep going.",
+            "You miss 100% of the shots you don't take.",
+            "Success is not final, failure is not fatal.",
+            "It is the courage to continue that counts.",
+            "Believe in yourself and all that you are.",
+            "There is something inside you that is greater than any obstacle.",
+            "Your time is limited, so do not waste it.",
+            "The only limit to our realization of tomorrow will be our doubts."
+        ];
+
+        const app = {
+            mode: 'time', // 'time' | 'words'
+            target: 30,
+            active: false,
+            finished: false,
+            timer: null,
+            
+            // Stats
+            startTime: 0,
+            totalKeyStrokes: 0, 
+            finalCorrectChars: 0, // Used for WPM
+            correctedCount: 0, // Yellow count
+            
+            // Logic
+            stackIdx: 0,
+            charIdx: 0,
+            dirtyMap: [], // Boolean array tracking errors for current line
+            history: [],  // Sentence buffer
+            
+            // Panning State
+            xOffset: 0,
+
+            init: () => {
+                app.renderTargets();
+                
+                const input = document.getElementById('input-trap');
+                
+                // Input handling
+                input.addEventListener('input', (e) => app.handleInput(e));
+                
+                // Special Keys
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Tab') {
+                        e.preventDefault();
+                        if (document.getElementById('game-ui').classList.contains('visible')) {
+                            app.restart();
+                        }
+                    }
+                    if (e.key === 'Enter' && app.active && !app.finished) {
+                        app.checkEnter();
+                    }
+                    if (app.active && !app.finished) input.focus();
+                });
+
+                document.addEventListener('click', () => {
+                    if (app.active && !app.finished) input.focus();
+                });
+            },
+
+            setMode: (m) => {
+                app.mode = m;
+                document.querySelectorAll('#mode-select .btn').forEach(b => b.classList.remove('active'));
+                const idx = m === 'time' ? 0 : 1;
+                document.querySelectorAll('#mode-select .btn')[idx].classList.add('active');
+                app.target = m === 'time' ? 30 : 10; // Default to 10 for words mode
+                app.renderTargets();
+            },
+
+            setTarget: (v) => {
+                app.target = v;
+                app.renderTargets();
+            },
+
+            renderTargets: () => {
+                const box = document.getElementById('target-select');
+                box.innerHTML = '';
+                // Updated Config: 10, 15, 25 for words mode
+                const opts = app.mode === 'time' ? [15, 30, 60] : [10, 15, 25];
+                const labs = app.mode === 'time' ? ['15s', '30s', '60s'] : ['10', '15', '25'];
+                
+                opts.forEach((o, i) => {
+                    const btn = document.createElement('button');
+                    btn.className = `btn ${app.target === o ? 'active' : ''}`;
+                    btn.innerText = labs[i];
+                    btn.onclick = () => app.setTarget(o);
+                    box.appendChild(btn);
+                });
+            },
+
+            startGame: () => {
+                document.getElementById('menu-layer').classList.add('hidden');
+                document.getElementById('game-ui').classList.add('visible');
+                app.restart();
+            },
+
+            restart: () => {
+                app.active = true;
+                app.finished = false;
+                clearInterval(app.timer);
+                
+                app.stackIdx = 0;
+                app.charIdx = 0;
+                app.totalKeyStrokes = 0;
+                app.finalCorrectChars = 0;
+                app.correctedCount = 0;
+                app.xOffset = 0;
+                
+                // Clear UI
+                document.getElementById('modal').classList.remove('open');
+                const stack = document.getElementById('stack');
+                stack.innerHTML = '';
+                
+                // Reset Generator
+                app.history = [];
+                for(let i=0; i<10; i++) app.addLine(i===0);
+                
+                // Init dirty map for first line
+                app.resetDirtyMap(0);
+                
+                app.alignStack(); // Will also update caret
+
+                // Timer Logic
+                if(app.mode === 'time') {
+                    let t = app.target;
+                    document.getElementById('timer').innerText = t;
+                    app.timer = setInterval(() => {
+                        t--;
+                        document.getElementById('timer').innerText = t;
+                        if(t <= 0) app.endGame();
+                    }, 1000);
+                } else {
+                    app.startTime = Date.now();
+                    document.getElementById('timer').innerText = `0/${app.target}`;
+                }
+
+                document.getElementById('input-trap').value = '';
+                document.getElementById('input-trap').focus();
+            },
+
+            backToMenu: () => {
+                document.getElementById('game-ui').classList.remove('visible');
+                document.getElementById('modal').classList.remove('open');
+                document.getElementById('menu-layer').classList.remove('hidden');
+                app.active = false;
+            },
+
+            // --- Core Logic ---
+
+            addLine: (isActive) => {
+                let idx, safety=0;
+                do {
+                    idx = Math.floor(Math.random() * SENTENCES.length);
+                    safety++;
+                } while (app.history.includes(idx) && safety < 50);
+                
+                app.history.push(idx);
+                if(app.history.length > 25) app.history.shift();
+
+                const text = SENTENCES[idx];
+                const div = document.createElement('div');
+                div.className = `line ${isActive?'active':''}`;
+                
+                let html = text.split('').map(c => `<span class="char">${c}</span>`).join('');
+                html += `<span class="enter-hint">↵</span>`;
+                div.innerHTML = html;
+                document.getElementById('stack').appendChild(div);
+            },
+
+            resetDirtyMap: (lineIndex) => {
+                const lines = document.getElementById('stack').children;
+                if(!lines[lineIndex]) return;
+                const txtLen = lines[lineIndex].querySelectorAll('.char').length;
+                app.dirtyMap = new Array(txtLen).fill(false);
+            },
+
+            handleInput: (e) => {
+                if (!app.active || app.finished) return;
+
+                const inputType = e.inputType;
+                const lines = document.getElementById('stack').children;
+                const currentLine = lines[app.stackIdx];
+                const chars = currentLine.querySelectorAll('.char');
+                const text = Array.from(chars).map(s => s.innerText).join('');
+
+                // Backspace
+                if (inputType === 'deleteContentBackward') {
+                    if (app.charIdx > 0) {
+                        app.charIdx--;
+                        // Strictly remove styling for current index
+                        chars[app.charIdx].className = 'char';
+                        // Do NOT false the dirtyMap.
+                        app.totalKeyStrokes++; // Backspace counts as effort
+                    }
+                    currentLine.querySelector('.enter-hint').classList.remove('show');
+                    app.calcOffset(); // Recalculate panning
+                    app.updateCaret(); // Update visual caret
+                    return;
+                }
+
+                if (e.data) {
+                    const inputChars = e.data.split('');
+                    
+                    inputChars.forEach(char => {
+                        // Prevent overflow typing
+                        if (app.charIdx >= text.length) return;
+
+                        app.totalKeyStrokes++;
+                        const targetChar = text[app.charIdx];
+                        const span = chars[app.charIdx];
+
+                        app.spawnParticles(span);
+
+                        if (char === targetChar) {
+                            if (app.dirtyMap[app.charIdx]) {
+                                span.className = 'char corrected'; // Yellow
+                                app.correctedCount++;
+                            } else {
+                                span.className = 'char correct'; // Green
+                            }
+                            app.finalCorrectChars++;
+                        } else {
+                            span.className = 'char incorrect'; // Red
+                            app.dirtyMap[app.charIdx] = true;
+                            app.shakeScreen();
+                        }
+
+                        app.charIdx++;
+                    });
+                    
+                    // Show enter hint if at end
+                    if(app.charIdx >= text.length) {
+                        currentLine.querySelector('.enter-hint').classList.add('show');
+                    }
+                    
+                    app.calcOffset(); // Calculate horizontal pan
+                    app.updateCaret();
+                }
+            },
+
+            checkEnter: () => {
+                const lines = document.getElementById('stack').children;
+                const currentLine = lines[app.stackIdx];
+                const len = currentLine.querySelectorAll('.char').length;
+
+                if (app.charIdx >= len) {
+                    // Next Line Logic
+                    currentLine.classList.remove('active');
+                    currentLine.querySelector('.enter-hint').classList.remove('show');
+                    
+                    // Update Stats
+                    if(app.mode === 'words') {
+                        const count = app.stackIdx + 1;
+                        document.getElementById('timer').innerText = `${count}/${app.target}`;
+                        if(count >= app.target) {
+                            app.endGame();
+                            return;
+                        }
+                    }
+
+                    app.stackIdx++;
+                    app.charIdx = 0;
+                    app.xOffset = 0; // RESET PAN ON ENTER
+                    
+                    const next = lines[app.stackIdx];
+                    if(next) {
+                        next.classList.add('active');
+                        app.resetDirtyMap(app.stackIdx);
+                    }
+
+                    app.addLine(false);
+                    app.alignStack(); // Update Y and X transform
+                }
+            },
+
+            calcOffset: () => {
+                // Calculate Panning
+                const lines = document.getElementById('stack').children;
+                const currentLine = lines[app.stackIdx];
+                const chars = currentLine.querySelectorAll('.char');
+                
+                let charPos = 0;
+                // If at end, add enter hint width approx or last char
+                if (app.charIdx > 0) {
+                   const prevChar = chars[app.charIdx - 1];
+                   // get offset relative to the line start
+                   charPos = prevChar.offsetLeft + prevChar.offsetWidth; 
+                }
+                
+                const viewportWidth = document.getElementById('viewport').offsetWidth;
+                const safeZone = viewportWidth * 0.7; // Start scrolling at 70% width
+                
+                if (charPos > safeZone) {
+                    app.xOffset = charPos - safeZone;
+                } else {
+                    app.xOffset = 0; // Or keep it simple? No, stick to resetting if we backspace far enough
+                }
+                
+                app.alignStack();
+            },
+
+            alignStack: () => {
+                // Combine Y-Scroll (Line switching) and X-Scroll (Panning)
+                // Y: Center active line. line-height 4rem. Offset = stackIdx * 4 + 2.
+                const lh = 4;
+                const yOffset = (app.stackIdx * lh) + (lh/2);
+                
+                // Apply transform
+                document.getElementById('stack').style.transform = 
+                    `translate(calc(-${app.xOffset}px), calc(-${yOffset}rem))`;
+                    
+                app.updateCaret(); // Ensure caret follows transform
+            },
+
+            updateCaret: () => {
+                const lines = document.getElementById('stack').children;
+                const currentLine = lines[app.stackIdx];
+                const chars = currentLine.querySelectorAll('.char');
+                
+                let rawLeft = 0;
+                
+                if (app.charIdx < chars.length) {
+                    rawLeft = chars[app.charIdx].offsetLeft;
+                } else {
+                    if(chars.length > 0) {
+                        const last = chars[chars.length-1];
+                        rawLeft = last.offsetLeft + last.offsetWidth;
+                    }
+                }
+                
+                // Visual Left Position = (Element Offset inside Line) - (Stack X Pan)
+                const visualLeft = rawLeft - app.xOffset;
+                
+                const caret = document.getElementById('caret');
+                caret.style.left = visualLeft + 'px';
+                
+                caret.classList.remove('blink');
+                void caret.offsetWidth;
+                if(!app.active) caret.classList.add('blink');
+            },
+
+            spawnParticles: (target) => {
+                const rect = target.getBoundingClientRect();
+                const view = document.getElementById('viewport').getBoundingClientRect();
+                
+                const x = rect.left - view.left + (rect.width/2);
+                const y = rect.top - view.top + (rect.height/2);
+                
+                for(let i=0; i<5; i++) {
+                    const p = document.createElement('div');
+                    p.classList.add('particle');
+                    document.getElementById('viewport').appendChild(p);
+                    p.style.left = x + 'px';
+                    p.style.top = y + 'px';
+                    
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = 20 + Math.random() * 40;
+                    const dx = Math.cos(angle) * speed;
+                    const dy = Math.sin(angle) * speed;
+                    
+                    p.style.setProperty('--dx', `${dx}px`);
+                    p.style.setProperty('--dy', `${dy}px`);
+                    
+                    setTimeout(() => p.remove(), 500);
+                }
+            },
+
+            shakeScreen: () => {
+                document.body.classList.remove('shake');
+                void document.body.offsetWidth;
+                document.body.classList.add('shake');
+            },
+
+            endGame: () => {
+                app.active = false;
+                app.finished = true;
+                clearInterval(app.timer);
+
+                let timeMin;
+                if (app.mode === 'time') timeMin = app.target / 60;
+                else timeMin = ((Date.now() - app.startTime) / 1000) / 60;
+                
+                if(timeMin <= 0) timeMin = 0.01;
+
+                const netWpm = Math.round((app.finalCorrectChars / 5) / timeMin);
+                const rawWpm = Math.round((app.totalKeyStrokes / 5) / timeMin);
+                
+                const acc = app.totalKeyStrokes > 0 
+                    ? Math.round((app.finalCorrectChars / app.totalKeyStrokes) * 100)
+                    : 0;
+
+                document.getElementById('res-wpm').innerText = netWpm;
+                document.getElementById('res-acc').innerText = acc + '%';
+                document.getElementById('res-raw').innerText = rawWpm;
+                document.getElementById('res-fixed').innerText = app.correctedCount;
+                
+                document.getElementById('modal').classList.add('open');
+            }
+        };
+
+        window.onload = app.init;
+    </script>
+</body>
+</html>
